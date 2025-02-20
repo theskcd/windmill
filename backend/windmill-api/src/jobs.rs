@@ -1467,7 +1467,7 @@ async fn list_queue_jobs(
             "v2_job_queue.scheduled_for",
             "v2_job.runnable_id as script_hash",
             "v2_job.runnable_path as script_path",
-            "null as args",
+            &if lq.list_args.unwrap_or(false) { "v2_job.args" } else { "null as args" },
             "v2_job.kind as job_kind",
             "CASE WHEN v2_job.trigger_kind = 'schedule' THEN v2_job.trigger END as schedule_path",
             "v2_job.permissioned_as",
@@ -5454,6 +5454,8 @@ pub struct ListCompletedQuery {
     pub label: Option<String>,
     pub is_not_schedule: Option<bool>,
     pub concurrency_key: Option<String>,
+    pub list_args: Option<bool>,
+    pub list_results: Option<bool>,
 }
 
 async fn list_completed_jobs(
@@ -5502,6 +5504,8 @@ async fn list_completed_jobs(
             "v2_job.tag",
             "v2_job.priority",
             "v2_job_completed.result->'wm_labels' as labels",
+            &if lq.list_args.unwrap_or(false) { "v2_job.args" } else { "null as args" },
+            &if lq.list_results.unwrap_or(false) { "v2_job_completed.result" } else { "null as result" },
             "'CompletedJob' as type",
         ],
         false,
