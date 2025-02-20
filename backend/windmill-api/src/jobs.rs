@@ -1758,13 +1758,59 @@ async fn list_jobs(
             "cannot specify both success and running".to_string(),
         ));
     }
+
+    let mut completed_fields = vec![
+        "v2_job.id",
+        "v2_job.workspace_id",
+        "v2_job.parent_job",
+        "v2_job.created_by",
+        "v2_job.created_at",
+        "v2_job_completed.started_at",
+        "v2_job_completed.duration_ms",
+        "v2_job_completed.status = 'success' OR v2_job_completed.status = 'skipped' as success",
+        "v2_job.runnable_id as script_hash",
+        "v2_job.runnable_path as script_path",
+        "false as deleted",
+        "v2_job_completed.status = 'canceled' as canceled",
+        "v2_job_completed.canceled_by",
+        "v2_job_completed.canceled_reason",
+        "v2_job.kind as job_kind",
+        "CASE WHEN v2_job.trigger_kind = 'schedule' THEN v2_job.trigger END as schedule_path",
+        "v2_job.permissioned_as",
+        "null as raw_code",
+        "null as flow_status",
+        "null as raw_flow",
+        "v2_job.flow_step_id IS NOT NULL as is_flow_step",
+        "v2_job.script_lang as language",
+        "v2_job_completed.status = 'skipped' as is_skipped",
+        "v2_job.permissioned_as_email as email",
+        "v2_job.visible_to_owner",
+        "v2_job_completed.memory_peak as mem_peak",
+        "v2_job.tag",
+        "v2_job.priority",
+        "v2_job_completed.result->'wm_labels' as labels",
+        "'CompletedJob' as type",
+    ];
+
+    if lq.include_args.unwrap_or(false) {
+        completed_fields.push("v2_job.args as args");
+    } else {
+        completed_fields.push("null as args");
+    }
+
+    if lq.include_result.unwrap_or(false) {
+        completed_fields.push("CASE WHEN result is null or pg_column_size(result) < 90000 THEN result ELSE '\"WINDMILL_TOO_BIG\"'::jsonb END as result");
+    } else {
+        completed_fields.push("null as result");
+    }
+
     let sqlc = if lq.running.is_none() {
         Some(list_completed_jobs_query(
             &w_id,
             per_page + offset,
             0,
             &ListCompletedQuery { order_desc: Some(true), ..lqc },
-            UnifiedJob::completed_job_fields(),
+            &completed_fields,
             true,
             get_scope_tags(&authed),
         ))
@@ -1777,10 +1823,44 @@ async fn list_jobs(
         && lq.created_or_started_before.is_none()
         && lq.started_before.is_none()
     {
+        let mut queued_fields = vec![
+            "v2_job.id",
+            "v2_job.workspace_id",
+            "v2_job.parent_job",
+            "v2_job.created_by",
+            "v2_job.created_at",
+            "v2_job_queue.started_at",
+            "v2_job_queue.scheduled_for",
+            "v2_job_queue.running",
+            "v2_job.runnable_id as script_hash",
+            "v2_job.runnable_path as script_path",
+            "v2_job.kind as job_kind",
+            "CASE WHEN v2_job.trigger_kind = 'schedule' THEN v2_job.trigger END as schedule_path",
+            "v2_job.permissioned_as",
+            "v2_job.flow_step_id IS NOT NULL as is_flow_step",
+            "v2_job.script_lang as language",
+            "v2_job.permissioned_as_email as email",
+            "v2_job.visible_to_owner",
+            "v2_job_queue.suspend",
+            "null as mem_peak",
+            "v2_job.tag",
+            "v2_job.concurrent_limit",
+            "v2_job.concurrency_time_window_s",
+            "v2_job.priority",
+            "null as labels",
+            "'QueuedJob' as type",
+        ];
+
+        if lq.include_args.unwrap_or(false) {
+            queued_fields.push("v2_job.args as args");
+        } else {
+            queued_fields.push("null as args");
+        }
+
         let mut sqlq = list_queue_jobs_query(
             &w_id,
             &ListQueueQuery { order_desc: Some(true), ..lq.into() },
-            UnifiedJob::queued_job_fields(),
+            &queued_fields,
             Pagination { per_page: Some(limit), page: None },
             true,
             get_scope_tags(&authed),
@@ -5454,6 +5534,8 @@ pub struct ListCompletedQuery {
     pub label: Option<String>,
     pub is_not_schedule: Option<bool>,
     pub concurrency_key: Option<String>,
+    pub include_args: Option<bool>,
+    pub include_result: Option<bool>,
 }
 
 async fn list_completed_jobs(
