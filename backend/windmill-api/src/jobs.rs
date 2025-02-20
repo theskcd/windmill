@@ -1260,6 +1260,8 @@ pub struct ListQueueQuery {
     pub has_null_parent: Option<bool>,
     pub is_not_schedule: Option<bool>,
     pub concurrency_key: Option<String>,
+    pub list_args: Option<bool>,
+    pub list_results: Option<bool>,
 }
 
 impl From<ListCompletedQuery> for ListQueueQuery {
@@ -1406,14 +1408,19 @@ pub fn filter_list_queue_query(
 pub fn list_queue_jobs_query(
     w_id: &str,
     lq: &ListQueueQuery,
-    fields: &[&str],
+    _fields: &[&str],
     pagination: Pagination,
     join_outstanding_wait_times: bool,
     tags: Option<Vec<&str>>,
 ) -> SqlBuilder {
+    let fields = if lq.list_args.unwrap_or(false) {
+        UnifiedJob::queued_job_fields_with_args()
+    } else {
+        UnifiedJob::queued_job_fields().to_vec()
+    };
     let (limit, offset) = paginate_without_limits(pagination);
     let mut sqlb = SqlBuilder::select_from("v2_job_queue")
-        .fields(fields)
+        .fields(&fields)
         .order_by("v2_job.created_at", lq.order_desc.unwrap_or(true))
         .limit(limit)
         .offset(offset)
@@ -2752,8 +2759,22 @@ impl UnifiedJob {
     pub fn completed_job_fields() -> &'static [&'static str] {
         CJ_FIELDS
     }
+
+    pub fn completed_job_fields_with_args_results() -> Vec<&'static str> {
+        let mut fields = CJ_FIELDS.to_vec();
+        fields.push("v2_job.args as args");
+        fields.push("v2_job_completed.result as result"); 
+        fields
+    }
+
     pub fn queued_job_fields() -> &'static [&'static str] {
         QJ_FIELDS
+    }
+
+    pub fn queued_job_fields_with_args() -> Vec<&'static str> {
+        let mut fields = QJ_FIELDS.to_vec();
+        fields.push("v2_job.args as args");
+        fields
     }
 }
 
@@ -5404,12 +5425,17 @@ pub fn list_completed_jobs_query(
     per_page: usize,
     offset: usize,
     lq: &ListCompletedQuery,
-    fields: &[&str],
+    _fields: &[&str],
     join_outstanding_wait_times: bool,
     tags: Option<Vec<&str>>,
 ) -> SqlBuilder {
+    let fields = if lq.list_args.unwrap_or(false) || lq.list_results.unwrap_or(false) {
+        UnifiedJob::completed_job_fields_with_args_results()
+    } else {
+        UnifiedJob::completed_job_fields().to_vec()
+    };
     let mut sqlb = SqlBuilder::select_from("v2_job_completed")
-        .fields(fields)
+        .fields(&fields)
         .order_by("v2_job.created_at", lq.order_desc.unwrap_or(true))
         .offset(offset)
         .limit(per_page)
@@ -5454,6 +5480,8 @@ pub struct ListCompletedQuery {
     pub label: Option<String>,
     pub is_not_schedule: Option<bool>,
     pub concurrency_key: Option<String>,
+    pub list_args: Option<bool>,
+    pub list_results: Option<bool>,
 }
 
 async fn list_completed_jobs(
